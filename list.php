@@ -5,23 +5,29 @@ if (!isset($_SESSION['user_id'])) {
     exit;
 }
 
-$host = 'localhost';
-$db = 'todo_db';
+$host = 'mysql.railway.internal';
+$db = 'railway';
 $user = 'root';
-$pass = '';
+$pass = 'tAeaHNSsmyeqwZTTKSxazSRspYHVgDvo';
+$port = 3306;
 
-$conn = new mysqli($host, $user, $pass, $db);
+$conn = new mysqli($host, $user, $pass, $db, $port);
 if ($conn->connect_error) {
     die("Connection failed: " . $conn->connect_error);
 }
+
 $user_id = (int) $_SESSION['user_id'];
 
 // Fetch username for greeting
 $username = '';
-$result = $conn->query("SELECT username FROM users WHERE id = $user_id LIMIT 1");
+$stmt = $conn->prepare("SELECT username FROM users WHERE id = ? LIMIT 1");
+$stmt->bind_param("i", $user_id);
+$stmt->execute();
+$result = $stmt->get_result();
 if ($row = $result->fetch_assoc()) {
     $username = htmlspecialchars($row['username']);
 }
+$stmt->close();
 
 // Handle AJAX POST requests
 if ($_SERVER["REQUEST_METHOD"] === "POST") {
@@ -30,31 +36,44 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
         $order = $_POST['order']; // expected as JSON array of todo IDs
         $ids = json_decode($order, true);
         if (is_array($ids)) {
+            $stmt = $conn->prepare("UPDATE todos SET sort_order = ? WHERE id = ? AND user_id = ?");
             foreach ($ids as $sort_order => $id) {
-                $id = (int)$id;
-                $sort_order = (int)$sort_order;
-                $conn->query("UPDATE todos SET sort_order = $sort_order WHERE id = $id AND user_id = $user_id");
+                $id = (int) $id;
+                $sort_order = (int) $sort_order;
+                $stmt->bind_param("iii", $sort_order, $id, $user_id);
+                $stmt->execute();
             }
+            $stmt->close();
         }
         exit;
     }
     if (isset($_POST['content']) && !isset($_POST['id'])) {
-        $content = $conn->real_escape_string(trim($_POST['content']));
+        $content = trim($_POST['content']);
         if ($content !== '') {
-            // Insert with max sort_order + 1
-            $res = $conn->query("SELECT MAX(sort_order) AS max_order FROM todos WHERE user_id = $user_id");
+            $stmt = $conn->prepare("SELECT MAX(sort_order) AS max_order FROM todos WHERE user_id = ?");
+            $stmt->bind_param("i", $user_id);
+            $stmt->execute();
+            $res = $stmt->get_result();
             $max_order = 0;
             if ($row = $res->fetch_assoc()) {
-                $max_order = (int)$row['max_order'] + 1;
+                $max_order = (int) $row['max_order'] + 1;
             }
-            $conn->query("INSERT INTO todos (content, user_id, sort_order) VALUES ('$content', $user_id, $max_order)");
+            $stmt->close();
+
+            $stmt = $conn->prepare("INSERT INTO todos (content, user_id, sort_order) VALUES (?, ?, ?)");
+            $stmt->bind_param("sii", $content, $user_id, $max_order);
+            $stmt->execute();
+            $stmt->close();
         }
         exit;
     } elseif (isset($_POST['id']) && isset($_POST['content'])) {
         $id = (int) $_POST['id'];
-        $content = $conn->real_escape_string(trim($_POST['content']));
+        $content = trim($_POST['content']);
         if ($content !== '') {
-            $conn->query("UPDATE todos SET content = '$content' WHERE id = $id AND user_id = $user_id");
+            $stmt = $conn->prepare("UPDATE todos SET content = ? WHERE id = ? AND user_id = ?");
+            $stmt->bind_param("sii", $content, $id, $user_id);
+            $stmt->execute();
+            $stmt->close();
         }
         exit;
     }
@@ -62,22 +81,29 @@ if ($_SERVER["REQUEST_METHOD"] === "POST") {
 
 if (isset($_GET['delete'])) {
     $id = (int) $_GET['delete'];
-    $conn->query("DELETE FROM todos WHERE id = $id AND user_id = $user_id");
+    $stmt = $conn->prepare("DELETE FROM todos WHERE id = ? AND user_id = ?");
+    $stmt->bind_param("ii", $id, $user_id);
+    $stmt->execute();
+    $stmt->close();
     exit;
 }
 
 if (isset($_GET['fetch'])) {
-    // Changed ORDER BY to sort_order ASC for drag order
-    $result = $conn->query("SELECT * FROM todos WHERE user_id = $user_id ORDER BY sort_order ASC");
+    $stmt = $conn->prepare("SELECT * FROM todos WHERE user_id = ? ORDER BY sort_order ASC");
+    $stmt->bind_param("i", $user_id);
+    $stmt->execute();
+    $result = $stmt->get_result();
     $todos = [];
     while ($row = $result->fetch_assoc()) {
         $todos[] = $row;
     }
+    $stmt->close();
     header('Content-Type: application/json');
     echo json_encode($todos);
     exit;
 }
 ?>
+
 
 <!DOCTYPE html>
 <html lang="en">
